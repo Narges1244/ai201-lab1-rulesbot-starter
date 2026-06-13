@@ -2,7 +2,21 @@ from groq import Groq
 from config import GROQ_API_KEY, LLM_MODEL
 
 _client = Groq(api_key=GROQ_API_KEY)
+def _format_context(chunks):
+    """
+    Turn a list of retrieved chunks into a numbered context block for the prompt.
+    Filters out weak matches (distance > 1.0) before formatting.
+    """
+    strong = [c for c in chunks if c.get("distance", 0) <= 1.0]
+    if not strong:
+        return None
 
+    lines = []
+    for i, chunk in enumerate(strong, 1):
+        lines.append(
+            f"[{i}] (Source: {chunk['game']})\n{chunk['text'].strip()}"
+        )
+    return "\n\n".join(lines)
 
 def generate_response(query, retrieved_chunks):
     """
@@ -29,11 +43,36 @@ def generate_response(query, retrieved_chunks):
 
     Return the response as a plain string.
     """
+
     if not retrieved_chunks:
         return (
             "I couldn't find anything relevant in the loaded rule books. "
             "Try rephrasing your question — or check that your ingestion pipeline is working."
         )
+    context = _format_context(retrieved_chunks)
 
-    # Your implementation here.
-    return "⚙️ Response generation not yet implemented. Complete Milestone 3 to activate answers."
+    if context is None:
+        return (
+            "The retrieved passages didn't match your question closely enough to give a "
+            "reliable answer. Try rephrasing, or check that the right rule book is loaded."
+        )
+
+    user_message = f"""Context:
+{context}
+
+Question: {query}
+Answer using only the context above. Cite which source each piece of information comes from."""
+
+    
+    
+    response = _client.chat.completions.create(
+          model=LLM_MODEL,
+          messages=[
+              {"role": "system", "content": SYSTEM_PROMPT},
+              {"role": "user",   "content": user_message},
+          ],
+      )
+
+    return response.choices[0].message.content or (
+          "The model returned an empty response. Please try again."
+      )
